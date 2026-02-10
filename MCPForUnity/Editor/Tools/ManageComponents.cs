@@ -12,7 +12,7 @@ namespace MCPForUnity.Editor.Tools
 {
     /// <summary>
     /// Tool for managing components on GameObjects.
-    /// Actions: add, remove, set_property
+    /// Actions: add, remove, set_property, set_enabled
     /// 
     /// This is a focused tool for component lifecycle operations.
     /// For reading component data, use the unity://scene/gameobject/{id}/components resource.
@@ -35,7 +35,7 @@ namespace MCPForUnity.Editor.Tools
             string action = ParamCoercion.CoerceString(@params["action"], null)?.ToLowerInvariant();
             if (string.IsNullOrEmpty(action))
             {
-                return new ErrorResponse("'action' parameter is required (add, remove, set_property).");
+                return new ErrorResponse("'action' parameter is required (add, remove, set_property, set_enabled).");
             }
 
             // Target resolution
@@ -54,7 +54,8 @@ namespace MCPForUnity.Editor.Tools
                     "add" => AddComponent(@params, targetToken, searchMethod),
                     "remove" => RemoveComponent(@params, targetToken, searchMethod),
                     "set_property" => SetProperty(@params, targetToken, searchMethod),
-                    _ => new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property")
+                    "set_enabled" => SetEnabled(@params, targetToken, searchMethod),
+                    _ => new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property, set_enabled")
                 };
             }
             catch (Exception e)
@@ -260,6 +261,83 @@ namespace MCPForUnity.Editor.Tools
             {
                 return new ErrorResponse($"Error setting properties on component '{componentType}': {e.Message}");
             }
+        }
+
+        private static object SetEnabled(JObject @params, JToken targetToken, string searchMethod)
+        {
+            GameObject targetGo = FindTarget(targetToken, searchMethod);
+            if (targetGo == null)
+            {
+                return new ErrorResponse($"Target GameObject ('{targetToken}') not found using method '{searchMethod ?? "default"}'.");
+            }
+
+            bool? enabledState = ParamCoercion.CoerceBool(@params["value"] ?? @params["enabled"], null);
+            if (!enabledState.HasValue)
+            {
+                return new ErrorResponse("'value' (or 'enabled') boolean parameter is required for 'set_enabled' action.");
+            }
+
+            string componentTypeName = ParamCoercion.CoerceString(@params["componentType"] ?? @params["component_type"], null);
+            var targetComponents = new List<Component>();
+
+            if (!string.IsNullOrEmpty(componentTypeName))
+            {
+                Type targetType = UnityTypeResolver.ResolveComponent(componentTypeName);
+                if (targetType == null)
+                {
+                    return new ErrorResponse($"Component type '{componentTypeName}' not found.");
+                }
+
+                Component found = targetGo.GetComponent(targetType);
+                if (found == null)
+                {
+                    return new ErrorResponse($"Component '{componentTypeName}' not found on '{targetGo.name}'.");
+                }
+
+                targetComponents.Add(found);
+            }
+            else
+            {
+                targetComponents.AddRange(targetGo.GetComponents<Component>());
+            }
+
+            var toggled = new List<string>();
+            foreach (var component in targetComponents)
+            {
+                if (component is Behaviour behaviour)
+                {
+                    Undo.RecordObject(behaviour, $"Set enabled on {behaviour.GetType().Name}");
+                    behaviour.enabled = enabledState.Value;
+                    toggled.Add(behaviour.GetType().Name);
+                }
+                else if (component is Renderer renderer)
+                {
+                    Undo.RecordObject(renderer, $"Set enabled on {renderer.GetType().Name}");
+                    renderer.enabled = enabledState.Value;
+                    toggled.Add(renderer.GetType().Name);
+                }
+            }
+
+            if (toggled.Count == 0)
+            {
+                return new ErrorResponse(!string.IsNullOrEmpty(componentTypeName)
+                    ? $"Component '{componentTypeName}' does not support enabled toggling (Behaviour/Renderer only)."
+                    : $"No components on '{targetGo.name}' support enabled toggling (Behaviour/Renderer only).");
+            }
+
+            EditorUtility.SetDirty(targetGo);
+            MarkOwningSceneDirty(targetGo);
+
+            return new
+            {
+                success = true,
+                message = $"Set enabled={enabledState.Value} on {toggled.Count} component(s) on '{targetGo.name}'.",
+                data = new
+                {
+                    instanceID = targetGo.GetInstanceID(),
+                    components = toggled
+                }
+            };
         }
 
         #endregion

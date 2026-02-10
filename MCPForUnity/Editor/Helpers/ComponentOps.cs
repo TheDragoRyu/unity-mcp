@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections;
+using System.Globalization;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -160,86 +162,21 @@ namespace MCPForUnity.Editor.Helpers
                 return false;
             }
 
-            Type type = component.GetType();
-            BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase;
-            string normalizedName = ParamCoercion.NormalizePropertyName(propertyName);
-
-            // Try property first - check both original and normalized names for backwards compatibility
-            PropertyInfo propInfo = type.GetProperty(propertyName, flags) 
-                                 ?? type.GetProperty(normalizedName, flags);
-            if (propInfo != null && propInfo.CanWrite)
+            var segments = ParseMemberPath(propertyName, out error);
+            if (segments == null)
             {
-                try
-                {
-                    object convertedValue = PropertyConversion.ConvertToType(value, propInfo.PropertyType);
-                    // Detect conversion failure: null result when input wasn't null
-                    if (convertedValue == null && value.Type != JTokenType.Null)
-                    {
-                        error = $"Failed to convert value for property '{propertyName}' to type '{propInfo.PropertyType.Name}'.";
-                        return false;
-                    }
-                    propInfo.SetValue(component, convertedValue);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    error = $"Failed to set property '{propertyName}': {ex.Message}";
-                    return false;
-                }
+                return false;
             }
 
-            // Try field - check both original and normalized names for backwards compatibility
-            FieldInfo fieldInfo = type.GetField(propertyName, flags) 
-                               ?? type.GetField(normalizedName, flags);
-            if (fieldInfo != null && !fieldInfo.IsInitOnly)
+            try
             {
-                try
-                {
-                    object convertedValue = PropertyConversion.ConvertToType(value, fieldInfo.FieldType);
-                    // Detect conversion failure: null result when input wasn't null
-                    if (convertedValue == null && value.Type != JTokenType.Null)
-                    {
-                        error = $"Failed to convert value for field '{propertyName}' to type '{fieldInfo.FieldType.Name}'.";
-                        return false;
-                    }
-                    fieldInfo.SetValue(component, convertedValue);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    error = $"Failed to set field '{propertyName}': {ex.Message}";
-                    return false;
-                }
+                return SetNestedValue(component, component.GetType(), segments, 0, value, propertyName, out _, out error);
             }
-
-            // Try non-public serialized fields - traverse inheritance hierarchy
-            // Type.GetField() with NonPublic only finds fields declared directly on that type,
-            // so we need to walk up the inheritance chain manually
-            fieldInfo = FindSerializedFieldInHierarchy(type, propertyName)
-                     ?? FindSerializedFieldInHierarchy(type, normalizedName);
-            if (fieldInfo != null)
+            catch (Exception ex)
             {
-                try
-                {
-                    object convertedValue = PropertyConversion.ConvertToType(value, fieldInfo.FieldType);
-                    // Detect conversion failure: null result when input wasn't null
-                    if (convertedValue == null && value.Type != JTokenType.Null)
-                    {
-                        error = $"Failed to convert value for serialized field '{propertyName}' to type '{fieldInfo.FieldType.Name}'.";
-                        return false;
-                    }
-                    fieldInfo.SetValue(component, convertedValue);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    error = $"Failed to set serialized field '{propertyName}': {ex.Message}";
-                    return false;
-                }
+                error = $"Failed to set '{propertyName}': {ex.Message}";
+                return false;
             }
-
-            error = $"Property or field '{propertyName}' not found on component '{type.Name}'.";
-            return false;
         }
 
         /// <summary>
@@ -291,6 +228,426 @@ namespace MCPForUnity.Editor.Helpers
         }
 
         // --- Private Helpers ---
+
+        private sealed class MemberAccessor
+        {
+            private readonly PropertyInfo _property;
+            private readonly FieldInfo _field;
+
+            public MemberAccessor(PropertyInfo property) => _property = property;
+            public MemberAccessor(FieldInfo field) => _field = field;
+
+            public string Name => _property?.Name ?? _field?.Name;
+            public Type MemberType => _property?.PropertyType ?? _field?.FieldType;
+            public bool CanWrite => _property?.CanWrite == true || (_field != null && !_field.IsInitOnly);
+
+            public object GetValue(object target) => _property != null ? _property.GetValue(target) : _field.GetValue(target);
+            public void SetValue(object target, object value)
+            {
+                if (_property != null)
+                {
+                    _property.SetValue(target, value);
+                }
+                else
+                {
+                    _field.SetValue(target, value);
+                }
+            }
+        }
+
+        private enum CollectionIndexKind
+        {
+            None,
+            Indexed,
+            Append
+        }
+
+        private readonly struct MemberPathSegment
+        {
+            public MemberPathSegment(string name, CollectionIndexKind indexKind, int index)
+            {
+                Name = name;
+                IndexKind = indexKind;
+                Index = index;
+            }
+
+            public string Name { get; }
+            public CollectionIndexKind IndexKind { get; }
+            public int Index { get; }
+        }
+
+        private static List<MemberPathSegment> ParseMemberPath(string path, out string error)
+        {
+            error = null;
+            var result = new List<MemberPathSegment>();
+
+            string[] segments = path.Split('.');
+            foreach (string rawSegment in segments)
+            {
+                if (string.IsNullOrWhiteSpace(rawSegment))
+                {
+                    error = $"Invalid member path '{path}'.";
+                    return null;
+                }
+
+                int openBracket = rawSegment.IndexOf('[');
+                if (openBracket < 0)
+                {
+                    result.Add(new MemberPathSegment(rawSegment, CollectionIndexKind.None, -1));
+                    continue;
+                }
+
+                int closeBracket = rawSegment.IndexOf(']', openBracket + 1);
+                if (closeBracket < 0 || closeBracket != rawSegment.Length - 1)
+                {
+                    error = $"Invalid collection path segment '{rawSegment}' in '{path}'.";
+                    return null;
+                }
+
+                string memberName = rawSegment.Substring(0, openBracket);
+                string indexToken = rawSegment.Substring(openBracket + 1, closeBracket - openBracket - 1).Trim();
+                if (string.IsNullOrWhiteSpace(memberName))
+                {
+                    error = $"Invalid collection path segment '{rawSegment}' in '{path}'.";
+                    return null;
+                }
+
+                if (indexToken == "+" || indexToken.Length == 0)
+                {
+                    result.Add(new MemberPathSegment(memberName, CollectionIndexKind.Append, -1));
+                    continue;
+                }
+
+                if (!int.TryParse(indexToken, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index) || index < 0)
+                {
+                    error = $"Invalid collection index '{indexToken}' in segment '{rawSegment}'.";
+                    return null;
+                }
+
+                result.Add(new MemberPathSegment(memberName, CollectionIndexKind.Indexed, index));
+            }
+
+            return result;
+        }
+
+        private static bool SetNestedValue(object target, Type targetType, List<MemberPathSegment> segments, int segmentIndex, JToken input, string fullPath, out object updatedTarget, out string error)
+        {
+            updatedTarget = target;
+            error = null;
+
+            MemberPathSegment segment = segments[segmentIndex];
+            if (!TryResolveMember(targetType, segment.Name, out MemberAccessor member))
+            {
+                error = $"Unknown member segment '{segment.Name}' while resolving '{fullPath}' on type '{targetType.Name}'.";
+                return false;
+            }
+
+            if (!member.CanWrite && segmentIndex == segments.Count - 1)
+            {
+                error = $"Member '{member.Name}' on type '{targetType.Name}' is read-only.";
+                return false;
+            }
+
+            object memberValue = member.GetValue(target);
+            Type memberType = member.MemberType;
+            bool isLeaf = segmentIndex == segments.Count - 1;
+
+            if (segment.IndexKind != CollectionIndexKind.None)
+            {
+                if (!ApplyCollectionSegment(member, target, memberType, memberValue, segment, segments, segmentIndex, input, fullPath, out updatedTarget, out error))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (isLeaf)
+            {
+                if (!TryConvertValue(input, memberType, fullPath, out object converted, out error))
+                {
+                    return false;
+                }
+
+                member.SetValue(target, converted);
+                updatedTarget = target;
+                return true;
+            }
+
+            if (memberValue == null)
+            {
+                error = $"Member segment '{segment.Name}' is null while resolving '{fullPath}'.";
+                return false;
+            }
+
+            if (!SetNestedValue(memberValue, memberType, segments, segmentIndex + 1, input, fullPath, out object updatedChild, out error))
+            {
+                return false;
+            }
+
+            if (memberType.IsValueType || !ReferenceEquals(memberValue, updatedChild))
+            {
+                member.SetValue(target, updatedChild);
+            }
+
+            updatedTarget = target;
+            return true;
+        }
+
+        private static bool ApplyCollectionSegment(MemberAccessor member, object parentTarget, Type collectionType, object collectionValue, MemberPathSegment segment, List<MemberPathSegment> segments, int segmentIndex, JToken input, string fullPath, out object updatedTarget, out string error)
+        {
+            updatedTarget = parentTarget;
+            error = null;
+
+            if (!(collectionValue is IList list))
+            {
+                error = $"Member '{member.Name}' on type '{parentTarget.GetType().Name}' is not a list/array.";
+                return false;
+            }
+
+            Type itemType = GetCollectionItemType(collectionType);
+            bool isLeaf = segmentIndex == segments.Count - 1;
+
+            if (segment.IndexKind == CollectionIndexKind.Append)
+            {
+                if (collectionType.IsArray)
+                {
+                    error = $"Append mode is not supported for array member '{member.Name}'.";
+                    return false;
+                }
+
+                if (!isLeaf)
+                {
+                    error = $"Append mode can only be used at the final segment for '{fullPath}'.";
+                    return false;
+                }
+
+                if (!TryConvertValue(input, itemType, fullPath, out object appendedItem, out error, true))
+                {
+                    return false;
+                }
+
+                list.Add(appendedItem);
+                updatedTarget = parentTarget;
+                return true;
+            }
+
+            if (segment.Index >= list.Count)
+            {
+                error = $"Index {segment.Index} is out of range for member '{member.Name}' (count={list.Count}).";
+                return false;
+            }
+
+            if (isLeaf)
+            {
+                if (!TryConvertValue(input, itemType, fullPath, out object convertedItem, out error, true))
+                {
+                    return false;
+                }
+
+                list[segment.Index] = convertedItem;
+                updatedTarget = parentTarget;
+                return true;
+            }
+
+            object childValue = list[segment.Index];
+            if (childValue == null)
+            {
+                error = $"Collection element at index {segment.Index} is null while resolving '{fullPath}'.";
+                return false;
+            }
+
+            if (!SetNestedValue(childValue, itemType, segments, segmentIndex + 1, input, fullPath, out object updatedChild, out error))
+            {
+                return false;
+            }
+
+            if (itemType.IsValueType || !ReferenceEquals(childValue, updatedChild))
+            {
+                list[segment.Index] = updatedChild;
+            }
+
+            updatedTarget = parentTarget;
+            return true;
+        }
+
+        private static bool TryResolveMember(Type type, string memberName, out MemberAccessor accessor)
+        {
+            accessor = null;
+            BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase;
+            string normalizedName = ParamCoercion.NormalizePropertyName(memberName);
+
+            PropertyInfo propInfo = type.GetProperty(memberName, flags)
+                                 ?? type.GetProperty(normalizedName, flags);
+            if (propInfo != null)
+            {
+                accessor = new MemberAccessor(propInfo);
+                return true;
+            }
+
+            FieldInfo fieldInfo = type.GetField(memberName, flags)
+                               ?? type.GetField(normalizedName, flags)
+                               ?? FindSerializedFieldInHierarchy(type, memberName)
+                               ?? FindSerializedFieldInHierarchy(type, normalizedName);
+            if (fieldInfo != null)
+            {
+                accessor = new MemberAccessor(fieldInfo);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryConvertValue(JToken input, Type targetType, string path, out object converted, out string error, bool isCollectionItem = false)
+        {
+            converted = null;
+            error = null;
+
+            if (typeof(IList).IsAssignableFrom(targetType) && input is JArray inputArray)
+            {
+                return TryConvertCollection(inputArray, targetType, path, out converted, out error);
+            }
+
+            if (targetType.IsEnum)
+            {
+                if (!TryConvertEnum(input, targetType, out converted, out error))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            try
+            {
+                converted = PropertyConversion.ConvertToType(input, targetType);
+                if (converted == null && input.Type != JTokenType.Null)
+                {
+                    error = isCollectionItem
+                        ? $"Incompatible collection item type for '{path}'. Expected '{targetType.Name}'."
+                        : $"Failed to convert value for '{path}' to type '{targetType.Name}'.";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = isCollectionItem
+                    ? $"Incompatible collection item type for '{path}'. Expected '{targetType.Name}': {ex.Message}"
+                    : $"Failed to convert value for '{path}' to type '{targetType.Name}': {ex.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryConvertEnum(JToken input, Type enumType, out object converted, out string error)
+        {
+            converted = null;
+            error = null;
+
+            Type underlyingType = Enum.GetUnderlyingType(enumType);
+            if (input.Type == JTokenType.String)
+            {
+                string symbol = input.ToString();
+                foreach (string enumName in Enum.GetNames(enumType))
+                {
+                    if (string.Equals(enumName, symbol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        converted = Enum.Parse(enumType, enumName, ignoreCase: true);
+                        return true;
+                    }
+                }
+
+                if (long.TryParse(symbol, NumberStyles.Integer, CultureInfo.InvariantCulture, out long numericValue))
+                {
+                    converted = Enum.ToObject(enumType, Convert.ChangeType(numericValue, underlyingType, CultureInfo.InvariantCulture));
+                    return true;
+                }
+
+                error = $"Invalid enum symbol '{symbol}' for enum '{enumType.Name}'.";
+                return false;
+            }
+
+            try
+            {
+                object rawNumeric = input.ToObject(underlyingType, Newtonsoft.Json.JsonSerializer.CreateDefault());
+                converted = Enum.ToObject(enumType, rawNumeric);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Failed to convert enum value to '{enumType.Name}': {ex.Message}";
+                return false;
+            }
+        }
+
+        private static bool TryConvertCollection(JArray inputArray, Type targetType, string path, out object converted, out string error)
+        {
+            converted = null;
+            error = null;
+
+            Type itemType = GetCollectionItemType(targetType);
+
+            if (targetType.IsArray)
+            {
+                Array result = Array.CreateInstance(itemType, inputArray.Count);
+                for (int i = 0; i < inputArray.Count; i++)
+                {
+                    if (!TryConvertValue(inputArray[i], itemType, path, out object item, out error, true))
+                    {
+                        return false;
+                    }
+                    result.SetValue(item, i);
+                }
+
+                converted = result;
+                return true;
+            }
+
+            if (!typeof(IList).IsAssignableFrom(targetType))
+            {
+                return TryConvertValue(inputArray, targetType, path, out converted, out error);
+            }
+
+            IList list;
+            if (targetType.IsInterface || targetType.IsAbstract)
+            {
+                Type listType = typeof(List<>).MakeGenericType(itemType);
+                list = (IList)Activator.CreateInstance(listType);
+            }
+            else
+            {
+                list = (IList)Activator.CreateInstance(targetType);
+            }
+
+            foreach (var itemToken in inputArray)
+            {
+                if (!TryConvertValue(itemToken, itemType, path, out object item, out error, true))
+                {
+                    return false;
+                }
+
+                list.Add(item);
+            }
+
+            converted = list;
+            return true;
+        }
+
+        private static Type GetCollectionItemType(Type collectionType)
+        {
+            if (collectionType.IsArray)
+            {
+                return collectionType.GetElementType();
+            }
+
+            if (collectionType.IsGenericType)
+            {
+                return collectionType.GetGenericArguments()[0];
+            }
+
+            return typeof(object);
+        }
 
         /// <summary>
         /// Searches for a non-public [SerializeField] field through the entire inheritance hierarchy.
@@ -376,4 +733,3 @@ namespace MCPForUnity.Editor.Helpers
         }
     }
 }
-
