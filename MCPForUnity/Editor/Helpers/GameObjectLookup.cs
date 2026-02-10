@@ -319,17 +319,16 @@ namespace MCPForUnity.Editor.Helpers
                 var taggedObjects = allObjects.Where(go => go.CompareTag(tag));
 
                 if (maxResults > 0)
-                    taggedObjects = taggedObjects.Take(maxResults);
-
-                foreach (var go in taggedObjects)
                 {
-                    yield return go.GetInstanceID();
+                    taggedObjects = taggedObjects.Take(maxResults);
                 }
+
+                return taggedObjects.Select(go => go.GetInstanceID()).ToArray();
             }
             catch (UnityException)
             {
                 // Tag doesn't exist
-                yield break;
+                return Enumerable.Empty<int>();
             }
         }
 
