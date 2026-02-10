@@ -333,6 +333,15 @@ namespace MCPForUnity.Editor.Helpers
             }
         }
 
+        /// <summary>
+        /// Evaluates whether a GameObject identified by instance ID matches a search query.
+        /// </summary>
+        public static bool MatchesSearchById(int instanceId, SearchMethod method, string searchTerm, bool exactName)
+        {
+            var go = FindById(instanceId);
+            return MatchesSearch(go, method, searchTerm ?? string.Empty, exactName);
+        }
+
         private static bool MatchesSearch(GameObject go, SearchMethod method, string searchTerm, bool exactName)
         {
             if (go == null)

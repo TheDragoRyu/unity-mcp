@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using MCPForUnity.Editor.Helpers;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -56,9 +57,32 @@ namespace MCPForUnity.Editor.Tools
             try
             {
                 List<int> allIds;
+                var method = GameObjectLookup.ParseSearchMethod(searchMethod);
 
                 switch (relationship)
                 {
+                    case "":
+                        if (!string.IsNullOrEmpty(hierarchyPath))
+                        {
+                            allIds = GameObjectLookup.FindByHierarchyPath(hierarchyPath, parentId, includeInactive);
+                        }
+                        else if (hasParentId)
+                        {
+                            allIds = GameObjectLookup.SearchWithinParent(
+                                method,
+                                searchTerm,
+                                parentId.Value,
+                                includeDescendants,
+                                includeInactive,
+                                exactName,
+                                0);
+                        }
+                        else
+                        {
+                            allIds = GameObjectLookup.SearchGameObjects(method, searchTerm, includeInactive, 0);
+                        }
+                        break;
+
                     case "children":
                         if (!hasParentId)
                         {
@@ -66,7 +90,7 @@ namespace MCPForUnity.Editor.Tools
                         }
 
                         allIds = GameObjectLookup.SearchWithinParent(
-                            GameObjectLookup.ParseSearchMethod(searchMethod),
+                            method,
                             searchTerm,
                             parentId.Value,
                             includeDescendants,
@@ -82,6 +106,12 @@ namespace MCPForUnity.Editor.Tools
                         }
 
                         allIds = GameObjectLookup.GetSiblings(parentId.Value, includeInactive);
+                        if (!string.IsNullOrEmpty(searchTerm) || method == GameObjectLookup.SearchMethod.ById)
+                        {
+                            allIds = allIds
+                                .Where(id => GameObjectLookup.MatchesSearchById(id, method, searchTerm, exactName))
+                                .ToList();
+                        }
                         break;
 
                     case "next_sibling":
@@ -105,26 +135,7 @@ namespace MCPForUnity.Editor.Tools
                         break;
 
                     default:
-                        if (!string.IsNullOrEmpty(hierarchyPath))
-                        {
-                            allIds = GameObjectLookup.FindByHierarchyPath(hierarchyPath, parentId, includeInactive);
-                        }
-                        else if (hasParentId)
-                        {
-                            allIds = GameObjectLookup.SearchWithinParent(
-                                GameObjectLookup.ParseSearchMethod(searchMethod),
-                                searchTerm,
-                                parentId.Value,
-                                includeDescendants,
-                                includeInactive,
-                                exactName,
-                                0);
-                        }
-                        else
-                        {
-                            allIds = GameObjectLookup.SearchGameObjects(searchMethod, searchTerm, includeInactive, 0);
-                        }
-                        break;
+                        return new ErrorResponse("Invalid relationship. Supported values: children, siblings, next_sibling, prev_sibling.");
                 }
 
                 // Use standard pagination response
