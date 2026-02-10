@@ -6,6 +6,7 @@ using System.Reflection;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
+using MCPForUnity.Runtime.Serialization;
 
 namespace MCPForUnity.Editor.Helpers
 {
@@ -177,6 +178,49 @@ namespace MCPForUnity.Editor.Helpers
                 error = $"Failed to set '{propertyName}': {ex.Message}";
                 return false;
             }
+        }
+
+        private static bool TryConvertForMember(JToken value, Type targetType, string memberLabel, out object convertedValue, out string error)
+        {
+            convertedValue = null;
+            error = null;
+
+            try
+            {
+                convertedValue = PropertyConversion.ConvertToType(value, targetType);
+            }
+            catch (Exception ex)
+            {
+                error = $"Failed to convert value for {memberLabel} to type '{targetType.Name}': {ex.Message}";
+                return false;
+            }
+
+            bool isNullInput = value == null || value.Type == JTokenType.Null;
+            if (convertedValue == null && !isNullInput)
+            {
+                if (typeof(UnityEngine.Object).IsAssignableFrom(targetType))
+                {
+                    if (UnityAssetReferenceResolver.TryResolveAssetReference(value, typeof(UnityEngine.Object), out UnityEngine.Object resolvedAsset, out string resolveError) && resolvedAsset != null)
+                    {
+                        error = $"Resolved asset '{resolvedAsset.name}' ({resolvedAsset.GetType().Name}) but it cannot be assigned to {memberLabel} of type '{targetType.Name}'.";
+                        return false;
+                    }
+
+                    error = $"Failed to resolve asset for {memberLabel} as type '{targetType.Name}'. {resolveError}";
+                    return false;
+                }
+
+                error = $"Failed to convert value for {memberLabel} to type '{targetType.Name}'.";
+                return false;
+            }
+
+            if (convertedValue != null && !targetType.IsAssignableFrom(convertedValue.GetType()))
+            {
+                error = $"Converted value for {memberLabel} has type '{convertedValue.GetType().Name}', which is not assignable to '{targetType.Name}'.";
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -553,26 +597,11 @@ namespace MCPForUnity.Editor.Helpers
                 return true;
             }
 
-            try
-            {
-                converted = PropertyConversion.ConvertToType(input, targetType);
-                if (converted == null && input.Type != JTokenType.Null)
-                {
-                    error = isCollectionItem
-                        ? $"Incompatible collection item type for '{path}'. Expected '{targetType.Name}'."
-                        : $"Failed to convert value for '{path}' to type '{targetType.Name}'.";
-                    return false;
-                }
+            string label = isCollectionItem
+                ? $"collection item '{path}'"
+                : $"member '{path}'";
 
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = isCollectionItem
-                    ? $"Incompatible collection item type for '{path}'. Expected '{targetType.Name}': {ex.Message}"
-                    : $"Failed to convert value for '{path}' to type '{targetType.Name}': {ex.Message}";
-                return false;
-            }
+            return TryConvertForMember(input, targetType, label, out converted, out error);
         }
 
         private static bool TryConvertEnum(JToken input, Type enumType, out object converted, out string error)

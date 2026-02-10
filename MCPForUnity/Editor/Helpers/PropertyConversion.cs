@@ -1,9 +1,8 @@
 using System;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using MCPForUnity.Editor.Helpers;
-using UnityEditor;
 using UnityEngine;
+using MCPForUnity.Runtime.Serialization;
 
 namespace MCPForUnity.Editor.Helpers
 {
@@ -75,18 +74,16 @@ namespace MCPForUnity.Editor.Helpers
         /// <returns>The loaded asset, or null if not found</returns>
         public static UnityEngine.Object LoadAssetFromToken(JToken token, Type targetType)
         {
-            if (token == null || token.Type != JTokenType.String)
+            if (token == null || token.Type == JTokenType.Null)
                 return null;
 
-            string assetPath = AssetPathUtility.SanitizeAssetPath(token.ToString());
-            UnityEngine.Object loadedAsset = AssetDatabase.LoadAssetAtPath(assetPath, targetType);
-            
-            if (loadedAsset == null)
+            if (UnityAssetReferenceResolver.TryResolveAssetReference(token, targetType, out UnityEngine.Object loadedAsset, out string error))
             {
-                McpLog.Warn($"[PropertyConversion] Could not load asset of type {targetType.Name} from path: {assetPath}");
+                return loadedAsset;
             }
-            
-            return loadedAsset;
+
+            McpLog.Warn($"[PropertyConversion] {error}");
+            return null;
         }
     }
 }

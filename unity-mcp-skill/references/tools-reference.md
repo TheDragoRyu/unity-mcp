@@ -56,6 +56,10 @@ refresh_unity(
 )
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Scene Tools
@@ -91,14 +95,44 @@ Search for GameObjects (returns instance IDs only).
 
 ```python
 find_gameobjects(
-    search_term="Player",        # str, required
+    search_term="Player",        # str, optional if using `path` or `relationship`
     search_method="by_name",     # "by_name"|"by_tag"|"by_layer"|"by_component"|"by_path"|"by_id"
-    include_inactive=False,      # bool|str
-    page_size=50,                # int, default 50, max 500
-    cursor=0                     # int, pagination cursor
+    include_inactive=False,       # bool|str
+    parent_id=12345,              # optional scope/anchor object ID
+    include_descendants=True,     # when parent_id set: descendants vs direct children
+    exact_name=True,              # for by_name: exact match vs contains
+    path="UI/Panel/Button",      # strict hierarchy path (global or parent-relative)
+    relationship="children",     # "children"|"siblings"|"next_sibling"|"prev_sibling"
+    page_size=50,                 # int, default 50, max 500
+    cursor=0                      # int, pagination cursor
 )
-# Returns: {"ids": [12345, 67890], "next_cursor": 50, ...}
+# Returns: {"instanceIDs": [12345, 67890], "nextCursor": "50", ...}
+
+# Find child by name under parent (direct children only)
+find_gameobjects(
+    search_term="RetryButton",
+    search_method="by_name",
+    parent_id=1001,
+    relationship="children",
+    include_descendants=False,
+)
+
+# Strict path selection from parent
+find_gameobjects(path="ObjectivesPanel/Title", parent_id=1001)
+
+# All Image components under ObjectivesPanel
+find_gameobjects(
+    search_term="Image",
+    search_method="by_component",
+    parent_id=2002,
+    relationship="children",
+    include_descendants=True,
+)
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 
@@ -203,7 +237,34 @@ manage_components(
         "localScale": [2, 2, 2]
     }
 )
+
+# Set Image.sprite from canonical asset reference contract
+manage_components(
+    action="set_property",
+    target=12345,
+    component_type="Image",
+    property="sprite",
+    value={
+        "type": "AssetReference",
+        "guid": "0123456789abcdef0123456789abcdef",  # optional when path is provided
+        "path": "Assets/UI/IconAtlas.asset",         # optional when guid is provided
+        "subAsset": "Sprite:Play"                    # optional (name or Type:Name)
+    }
+)
+
+# Legacy reference forms (still supported)
+manage_components(action="set_property", target=12345, component_type="Image", property="sprite", value="Assets/UI/IconAtlas.asset")
+manage_components(action="set_property", target=12345, component_type="Image", property="sprite", value={"guid": "0123456789abcdef0123456789abcdef"})
+manage_components(action="set_property", target=12345, component_type="Image", property="sprite", value={"path": "Assets/UI/IconAtlas.asset"})
+
+# TMP font + material-like properties
+manage_components(action="set_property", target=12345, component_type="TMP_Text", property="font", value={"type":"AssetReference","path":"Assets/Fonts/MyFont.asset"})
+manage_components(action="set_property", target=12345, component_type="TMP_Text", property="fontSharedMaterial", value={"type":"AssetReference","path":"Assets/Fonts/MyFont.mat"})
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 
@@ -324,6 +385,10 @@ Delete a script file.
 delete_script(uri="mcpforunity://path/Assets/Scripts/OldScript.cs")
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Asset Tools
@@ -395,6 +460,10 @@ manage_prefabs(
     components_to_add=["AudioSource"]
 )
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 
@@ -481,6 +550,10 @@ manage_texture(
 )
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Editor Control Tools
@@ -535,6 +608,10 @@ read_console(
 read_console(action="clear")
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Testing Tools
@@ -570,6 +647,10 @@ result = get_test_job(
 # Returns: {"status": "complete"|"running"|"failed", "results": {...}}
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Search Tools
@@ -587,6 +668,10 @@ find_in_file(
 )
 # Returns: line numbers, content excerpts, match positions
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 
