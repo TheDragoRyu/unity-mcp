@@ -240,6 +240,7 @@ namespace MCPForUnity.Editor.Helpers
             public string Name => _property?.Name ?? _field?.Name;
             public Type MemberType => _property?.PropertyType ?? _field?.FieldType;
             public bool CanWrite => _property?.CanWrite == true || (_field != null && !_field.IsInitOnly);
+            public bool IsProperty => _property != null;
 
             public object GetValue(object target) => _property != null ? _property.GetValue(target) : _field.GetValue(target);
             public void SetValue(object target, object value)
@@ -428,6 +429,11 @@ namespace MCPForUnity.Editor.Helpers
                 }
 
                 list.Add(appendedItem);
+                if (!TryWriteCollectionBack(member, parentTarget, list, fullPath, out error))
+                {
+                    return false;
+                }
+
                 updatedTarget = parentTarget;
                 return true;
             }
@@ -446,6 +452,11 @@ namespace MCPForUnity.Editor.Helpers
                 }
 
                 list[segment.Index] = convertedItem;
+                if (!TryWriteCollectionBack(member, parentTarget, list, fullPath, out error))
+                {
+                    return false;
+                }
+
                 updatedTarget = parentTarget;
                 return true;
             }
@@ -467,7 +478,31 @@ namespace MCPForUnity.Editor.Helpers
                 list[segment.Index] = updatedChild;
             }
 
+            if (!TryWriteCollectionBack(member, parentTarget, list, fullPath, out error))
+            {
+                return false;
+            }
+
             updatedTarget = parentTarget;
+            return true;
+        }
+
+        private static bool TryWriteCollectionBack(MemberAccessor member, object parentTarget, IList list, string fullPath, out string error)
+        {
+            error = null;
+
+            if (!member.IsProperty)
+            {
+                return true;
+            }
+
+            if (!member.CanWrite)
+            {
+                error = $"Member '{member.Name}' on type '{parentTarget.GetType().Name}' is read-only and cannot be updated for '{fullPath}'.";
+                return false;
+            }
+
+            member.SetValue(parentTarget, list);
             return true;
         }
 

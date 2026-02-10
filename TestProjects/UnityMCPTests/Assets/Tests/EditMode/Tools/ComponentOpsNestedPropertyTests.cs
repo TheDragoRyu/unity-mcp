@@ -116,6 +116,30 @@ namespace MCPForUnityTests.Editor.Tools
             Assert.IsFalse(behaviour.enabled);
         }
 
+
+
+        [Test]
+        public void SetProperty_ArrayProxyIndexedSet_WritesBackThroughPropertySetter()
+        {
+            var proxy = _gameObject.AddComponent<CollectionProxyComponent>();
+
+            bool success = ComponentOps.SetProperty(proxy, "numbersProxy[1]", new JValue(99), out string error);
+
+            Assert.IsTrue(success, error);
+            Assert.AreEqual(99, proxy.Numbers[1]);
+        }
+
+        [Test]
+        public void SetProperty_ReadOnlyArrayProxyIndexedSet_ReturnsReadOnlyError()
+        {
+            var proxy = _gameObject.AddComponent<CollectionProxyComponent>();
+
+            bool success = ComponentOps.SetProperty(proxy, "readOnlyNumbersProxy[0]", new JValue(55), out string error);
+
+            Assert.IsFalse(success);
+            StringAssert.Contains("read-only", error);
+        }
+
         [Test]
         public void SetProperty_UnknownMemberSegment_ReturnsClearError()
         {
@@ -127,4 +151,20 @@ namespace MCPForUnityTests.Editor.Tools
             StringAssert.Contains("Unknown member segment", error);
         }
     }
+
+    public class CollectionProxyComponent : MonoBehaviour
+    {
+        private int[] _numbers = { 1, 2, 3 };
+
+        public int[] NumbersProxy
+        {
+            get => (int[])_numbers.Clone();
+            set => _numbers = value;
+        }
+
+        public int[] ReadOnlyNumbersProxy => (int[])_numbers.Clone();
+
+        public int[] Numbers => _numbers;
+    }
+
 }
