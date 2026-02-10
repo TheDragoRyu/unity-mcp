@@ -271,7 +271,7 @@ namespace MCPForUnity.Editor.Tools
                 return new ErrorResponse($"Target GameObject ('{targetToken}') not found using method '{searchMethod ?? "default"}'.");
             }
 
-            bool? enabledState = ParamCoercion.CoerceBool(@params["value"] ?? @params["enabled"], null);
+            bool? enabledState = ParamCoercion.CoerceBoolNullable(@params["value"] ?? @params["enabled"]);
             if (!enabledState.HasValue)
             {
                 return new ErrorResponse("'value' (or 'enabled') boolean parameter is required for 'set_enabled' action.");
