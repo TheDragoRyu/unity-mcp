@@ -8,6 +8,221 @@ using UnityEditor; // Required for AssetDatabase and EditorUtility
 
 namespace MCPForUnity.Runtime.Serialization
 {
+    public static class UnityAssetReferenceResolver
+    {
+#if UNITY_EDITOR
+        private const string CanonicalTypeName = "AssetReference";
+
+        private readonly struct ParsedSubAsset
+        {
+            public readonly string Name;
+            public readonly string TypeName;
+
+            public ParsedSubAsset(string name, string typeName)
+            {
+                Name = name;
+                TypeName = typeName;
+            }
+        }
+
+        public static bool TryResolveAssetReference(JToken token, Type expectedType, out UnityEngine.Object resolved, out string error)
+        {
+            resolved = null;
+            error = null;
+
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return true;
+            }
+
+            if (!TryExtractReference(token, out string path, out string guid, out string subAsset, out string extractError))
+            {
+                error = extractError;
+                return false;
+            }
+
+            if (!TryResolvePathOrGuid(path, guid, out string resolvedPath, out error))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(subAsset))
+            {
+                resolved = AssetDatabase.LoadAssetAtPath(resolvedPath, expectedType);
+                if (resolved == null)
+                {
+                    error = $"Could not load asset at path '{resolvedPath}' as type '{expectedType.Name}'.";
+                    return false;
+                }
+                return true;
+            }
+
+            var allAssets = AssetDatabase.LoadAllAssetsAtPath(resolvedPath);
+            if (allAssets == null || allAssets.Length == 0)
+            {
+                error = $"No assets found at path '{resolvedPath}' while resolving sub-asset '{subAsset}'.";
+                return false;
+            }
+
+            ParsedSubAsset subAssetSpec = ParseSubAsset(subAsset);
+            foreach (var candidate in allAssets)
+            {
+                if (candidate == null)
+                    continue;
+
+                if (!expectedType.IsAssignableFrom(candidate.GetType()))
+                    continue;
+
+                if (!MatchesSubAsset(candidate, subAssetSpec))
+                    continue;
+
+                resolved = candidate;
+                return true;
+            }
+
+            error = $"Could not resolve sub-asset '{subAsset}' at path '{resolvedPath}' as assignable to '{expectedType.Name}'.";
+            return false;
+        }
+
+        private static bool TryExtractReference(JToken token, out string path, out string guid, out string subAsset, out string error)
+        {
+            path = null;
+            guid = null;
+            subAsset = null;
+            error = null;
+
+            if (token.Type == JTokenType.String)
+            {
+                string strValue = token.Value<string>();
+                if (IsValidGuid(strValue))
+                {
+                    guid = strValue;
+                }
+                else
+                {
+                    path = strValue;
+                }
+                return true;
+            }
+
+            if (token.Type != JTokenType.Object)
+            {
+                error = $"Unsupported asset reference format '{token.Type}'. Expected string path/guid or object.";
+                return false;
+            }
+
+            var jo = (JObject)token;
+            string typeMarker = jo["type"]?.Value<string>();
+            if (!string.IsNullOrEmpty(typeMarker) && !string.Equals(typeMarker, CanonicalTypeName, StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"Unsupported typed reference '{typeMarker}'. Expected type '{CanonicalTypeName}'.";
+                return false;
+            }
+
+            path = jo["path"]?.Value<string>();
+            guid = jo["guid"]?.Value<string>();
+            subAsset = jo["subAsset"]?.Value<string>();
+
+            if (string.IsNullOrEmpty(path) && string.IsNullOrEmpty(guid))
+            {
+                error = $"Asset reference object must include 'path' or 'guid'. Object: {jo.ToString(Formatting.None)}";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryResolvePathOrGuid(string path, string guid, out string resolvedPath, out string error)
+        {
+            resolvedPath = null;
+            error = null;
+
+            if (!string.IsNullOrEmpty(guid))
+            {
+                string normalizedGuid = guid.Replace("-", "").ToLowerInvariant();
+                resolvedPath = AssetDatabase.GUIDToAssetPath(normalizedGuid);
+                if (string.IsNullOrEmpty(resolvedPath))
+                {
+                    error = $"Could not find asset path for GUID '{guid}'.";
+                    return false;
+                }
+                return true;
+            }
+
+            resolvedPath = path;
+            return true;
+        }
+
+        private static ParsedSubAsset ParseSubAsset(string subAsset)
+        {
+            if (string.IsNullOrWhiteSpace(subAsset))
+            {
+                return new ParsedSubAsset(null, null);
+            }
+
+            string trimmed = subAsset.Trim();
+            int separatorIndex = trimmed.IndexOf(':');
+            if (separatorIndex <= 0)
+            {
+                return new ParsedSubAsset(trimmed, null);
+            }
+
+            string typeName = trimmed.Substring(0, separatorIndex).Trim();
+            string name = trimmed.Substring(separatorIndex + 1).Trim();
+            return new ParsedSubAsset(string.IsNullOrEmpty(name) ? null : name, string.IsNullOrEmpty(typeName) ? null : typeName);
+        }
+
+        private static bool MatchesSubAsset(UnityEngine.Object candidate, ParsedSubAsset spec)
+        {
+            if (!string.IsNullOrEmpty(spec.TypeName) && !TypeMatches(candidate.GetType(), spec.TypeName))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(spec.Name) && !string.Equals(candidate.name, spec.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TypeMatches(Type candidateType, string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName))
+            {
+                return true;
+            }
+
+            var current = candidateType;
+            while (current != null)
+            {
+                if (string.Equals(current.Name, typeName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(current.FullName, typeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                current = current.BaseType;
+            }
+
+            return false;
+        }
+#endif
+
+        public static bool IsValidGuid(string str)
+        {
+            if (string.IsNullOrEmpty(str)) return false;
+            string normalized = str.Replace("-", "");
+            if (normalized.Length != 32) return false;
+            foreach (char c in normalized)
+            {
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                    return false;
+            }
+            return true;
+        }
+    }
+
     public class Vector3Converter : JsonConverter<Vector3>
     {
         public override void WriteJson(JsonWriter writer, Vector3 value, JsonSerializer serializer)
@@ -319,44 +534,28 @@ namespace MCPForUnity.Runtime.Serialization
             if (reader.TokenType == JsonToken.String)
             {
                 string strValue = reader.Value.ToString();
-
-                // Check if it looks like a GUID (32 hex chars, optionally with hyphens)
-                if (IsValidGuid(strValue))
+                if (UnityAssetReferenceResolver.TryResolveAssetReference(JToken.FromObject(strValue), objectType, out UnityEngine.Object loadedAsset, out string error))
                 {
-                    string path = UnityEditor.AssetDatabase.GUIDToAssetPath(strValue.Replace("-", "").ToLowerInvariant());
-                    if (!string.IsNullOrEmpty(path))
-                    {
-                        var asset = UnityEditor.AssetDatabase.LoadAssetAtPath(path, objectType);
-                        if (asset != null) return asset;
-                    }
-                    UnityEngine.Debug.LogWarning($"[UnityEngineObjectConverter] Could not load asset with GUID '{strValue}' as type '{objectType.Name}'.");
-                    return null;
+                    return loadedAsset;
                 }
 
-                // Assume it's an asset path
-                var loadedAsset = UnityEditor.AssetDatabase.LoadAssetAtPath(strValue, objectType);
-                if (loadedAsset == null)
-                {
-                    UnityEngine.Debug.LogWarning($"[UnityEngineObjectConverter] Could not load asset at path '{strValue}' as type '{objectType.Name}'.");
-                }
-                return loadedAsset;
+                UnityEngine.Debug.LogWarning($"[UnityEngineObjectConverter] {error}");
+                return null;
             }
 
             if (reader.TokenType == JsonToken.StartObject)
             {
                 JObject jo = JObject.Load(reader);
 
-                // Try to resolve by GUID first (for assets like ScriptableObjects, Materials, etc.)
-                if (jo.TryGetValue("guid", out JToken guidToken) && guidToken.Type == JTokenType.String)
+                // Try to resolve as typed/legacy asset reference first
+                if (jo.TryGetValue("type", out _) || jo.TryGetValue("guid", out _) || jo.TryGetValue("path", out _) || jo.TryGetValue("subAsset", out _))
                 {
-                    string guid = guidToken.ToString().Replace("-", "").ToLowerInvariant();
-                    string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
-                    if (!string.IsNullOrEmpty(path))
+                    if (UnityAssetReferenceResolver.TryResolveAssetReference(jo, objectType, out UnityEngine.Object asset, out string error))
                     {
-                        var asset = UnityEditor.AssetDatabase.LoadAssetAtPath(path, objectType);
-                        if (asset != null) return asset;
+                        return asset;
                     }
-                    UnityEngine.Debug.LogWarning($"[UnityEngineObjectConverter] Could not load asset with GUID '{guidToken}' as type '{objectType.Name}'.");
+
+                    UnityEngine.Debug.LogWarning($"[UnityEngineObjectConverter] {error}");
                     return null;
                 }
 
@@ -401,19 +600,6 @@ namespace MCPForUnity.Runtime.Serialization
                     return null;
                 }
 
-                // Check if there's an asset path in the object
-                if (jo.TryGetValue("path", out JToken pathToken) && pathToken.Type == JTokenType.String)
-                {
-                    string path = pathToken.ToString();
-                    var asset = UnityEditor.AssetDatabase.LoadAssetAtPath(path, objectType);
-                    if (asset != null)
-                    {
-                        return asset;
-                    }
-                    UnityEngine.Debug.LogWarning($"[UnityEngineObjectConverter] Could not load asset at path '{path}' as type '{objectType.Name}'.");
-                    return null;
-                }
-
                 // Object format not recognized
                 UnityEngine.Debug.LogWarning($"[UnityEngineObjectConverter] JSON object missing 'instanceID', 'guid', or 'path' field for {objectType.Name} deserialization. Object: {jo.ToString(Formatting.None)}");
                 return null;
@@ -432,20 +618,5 @@ namespace MCPForUnity.Runtime.Serialization
 #endif
         }
 
-        /// <summary>
-        /// Checks if a string looks like a valid GUID (32 hex chars, with or without hyphens).
-        /// </summary>
-        private static bool IsValidGuid(string str)
-        {
-            if (string.IsNullOrEmpty(str)) return false;
-            string normalized = str.Replace("-", "");
-            if (normalized.Length != 32) return false;
-            foreach (char c in normalized)
-            {
-                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-                    return false;
-            }
-            return true;
-        }
     }
 }

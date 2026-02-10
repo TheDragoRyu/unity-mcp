@@ -38,7 +38,7 @@ async def manage_components(
     property: Annotated[str,
                         "Property name to set (for set_property action)"] | None = None,
     value: Annotated[str | int | float | bool | dict | list ,
-                     "Value to set (for set_property action)"] | None = None,
+                     "Value to set (for set_property action). For Unity object references, prefer {'type':'AssetReference','guid':'...','path':'Assets/...','subAsset':'Sprite:Icon'}. Legacy string paths and {'guid':...}/{'path':...} objects still work."] | None = None,
     # For add/set_property - multiple properties
     properties: Annotated[
         dict[str, Any],
@@ -57,7 +57,13 @@ async def manage_components(
     - Add Rigidbody: action="add", target="Player", component_type="Rigidbody"
     - Remove BoxCollider: action="remove", target=-12345, component_type="BoxCollider"
     - Set single property: action="set_property", target="Enemy", component_type="Rigidbody", property="mass", value=5.0
+    - Set Image.sprite from sub-asset: value={"type":"AssetReference","path":"Assets/UI/Icons.asset","subAsset":"Sprite:Play"}
+    - Set TMP_Text.font by guid: value={"type":"AssetReference","guid":"0123456789abcdef0123456789abcdef"}
     - Set multiple properties: action="set_property", target="Enemy", component_type="Rigidbody", properties={"mass": 5.0, "useGravity": false}
+
+    Common error messages for reference assignment:
+    - "Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'."
+    - "Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'."
     """
     unity_instance = get_unity_instance_from_context(ctx)
 
