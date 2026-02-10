@@ -91,13 +91,39 @@ Search for GameObjects (returns instance IDs only).
 
 ```python
 find_gameobjects(
-    search_term="Player",        # str, required
+    search_term="Player",        # str, optional if using `path` or `relationship`
     search_method="by_name",     # "by_name"|"by_tag"|"by_layer"|"by_component"|"by_path"|"by_id"
-    include_inactive=False,      # bool|str
-    page_size=50,                # int, default 50, max 500
-    cursor=0                     # int, pagination cursor
+    include_inactive=False,       # bool|str
+    parent_id=12345,              # optional scope/anchor object ID
+    include_descendants=True,     # when parent_id set: descendants vs direct children
+    exact_name=True,              # for by_name: exact match vs contains
+    path="UI/Panel/Button",      # strict hierarchy path (global or parent-relative)
+    relationship="children",     # "children"|"siblings"|"next_sibling"|"prev_sibling"
+    page_size=50,                 # int, default 50, max 500
+    cursor=0                      # int, pagination cursor
 )
-# Returns: {"ids": [12345, 67890], "next_cursor": 50, ...}
+# Returns: {"instanceIDs": [12345, 67890], "nextCursor": "50", ...}
+
+# Find child by name under parent (direct children only)
+find_gameobjects(
+    search_term="RetryButton",
+    search_method="by_name",
+    parent_id=1001,
+    relationship="children",
+    include_descendants=False,
+)
+
+# Strict path selection from parent
+find_gameobjects(path="ObjectivesPanel/Title", parent_id=1001)
+
+# All Image components under ObjectivesPanel
+find_gameobjects(
+    search_term="Image",
+    search_method="by_component",
+    parent_id=2002,
+    relationship="children",
+    include_descendants=True,
+)
 ```
 
 ---

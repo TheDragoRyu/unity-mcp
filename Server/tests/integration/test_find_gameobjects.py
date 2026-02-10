@@ -198,3 +198,60 @@ async def test_find_gameobjects_by_path(monkeypatch):
     assert captured["params"]["searchMethod"] == "by_path"
     assert captured["params"]["searchTerm"] == "Canvas/Panel/Button"
 
+
+
+@pytest.mark.asyncio
+async def test_find_gameobjects_parent_scope_and_relationship(monkeypatch):
+    """Test parent scoping and relationship parameters are passed correctly."""
+    captured = {}
+
+    async def fake_send(cmd, params, **kwargs):
+        captured["params"] = params
+        return {"success": True, "data": {"instanceIDs": [42]}}
+
+    monkeypatch.setattr(
+        find_go_mod,
+        "async_send_command_with_retry",
+        fake_send,
+    )
+
+    resp = await find_go_mod.find_gameobjects(
+        ctx=DummyContext(),
+        search_term="Image",
+        search_method="by_component",
+        parent_id="1001",
+        include_descendants="true",
+        exact_name="false",
+        relationship="children",
+        path="UI/ObjectivesPanel",
+    )
+
+    assert resp.get("success") is True
+    p = captured["params"]
+    assert p["parentId"] == 1001
+    assert p["includeDescendants"] is True
+    assert p["exactName"] is False
+    assert p["relationship"] == "children"
+    assert p["path"] == "UI/ObjectivesPanel"
+
+
+@pytest.mark.asyncio
+async def test_find_gameobjects_accepts_relationship_without_search_term(monkeypatch):
+    """Relationship traversal should work without a search term."""
+
+    async def fake_send(cmd, params, **kwargs):
+        return {"success": True, "data": {"instanceIDs": [99]}}
+
+    monkeypatch.setattr(
+        find_go_mod,
+        "async_send_command_with_retry",
+        fake_send,
+    )
+
+    resp = await find_go_mod.find_gameobjects(
+        ctx=DummyContext(),
+        relationship="next_sibling",
+        parent_id=99,
+    )
+
+    assert resp.get("success") is True

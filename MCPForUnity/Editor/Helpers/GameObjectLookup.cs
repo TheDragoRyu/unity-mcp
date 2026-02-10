@@ -139,6 +139,155 @@ namespace MCPForUnity.Editor.Helpers
             return results;
         }
 
+        /// <summary>
+        /// Searches for GameObjects scoped to a parent object.
+        /// </summary>
+        /// <param name="method">The search method.</param>
+        /// <param name="searchTerm">The term to search for. Optional for relationship-only traversal.</param>
+        /// <param name="parentId">Parent instance ID.</param>
+        /// <param name="includeDescendants">Whether to search all descendants (true) or direct children only (false).</param>
+        /// <param name="includeInactive">Whether to include inactive objects.</param>
+        /// <param name="exactName">When searching by name, require exact match if true; otherwise substring match.</param>
+        /// <param name="maxResults">Maximum number of results to return (0 = unlimited).</param>
+        public static List<int> SearchWithinParent(
+            SearchMethod method,
+            string searchTerm,
+            int parentId,
+            bool includeDescendants,
+            bool includeInactive,
+            bool exactName,
+            int maxResults = 0)
+        {
+            var parent = FindById(parentId);
+            if (parent == null)
+            {
+                return new List<int>();
+            }
+
+            if (!includeInactive && !parent.activeInHierarchy)
+            {
+                return new List<int>();
+            }
+
+            IEnumerable<GameObject> scope = includeDescendants
+                ? GetDescendantsInHierarchyOrder(parent, includeInactive)
+                : GetChildrenInHierarchyOrder(parent, includeInactive);
+
+            var normalizedSearchTerm = searchTerm ?? string.Empty;
+            var matched = scope.Where(go => MatchesSearch(go, method, normalizedSearchTerm, exactName));
+
+            if (maxResults > 0)
+            {
+                matched = matched.Take(maxResults);
+            }
+
+            return matched.Select(go => go.GetInstanceID()).ToList();
+        }
+
+        /// <summary>
+        /// Resolves a strict hierarchy path from scene root, or from a parent when supplied.
+        /// </summary>
+        public static List<int> FindByHierarchyPath(string path, int? parentId = null, bool includeInactive = false)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return new List<int>();
+            }
+
+            var segments = path
+                .Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToArray();
+
+            if (segments.Length == 0)
+            {
+                return new List<int>();
+            }
+
+            IEnumerable<GameObject> currentLevel;
+            if (parentId.HasValue)
+            {
+                var parent = FindById(parentId.Value);
+                if (parent == null || (!includeInactive && !parent.activeInHierarchy))
+                {
+                    return new List<int>();
+                }
+
+                currentLevel = GetChildrenInHierarchyOrder(parent, includeInactive);
+            }
+            else
+            {
+                currentLevel = GetRootObjectsInHierarchyOrder(includeInactive);
+            }
+
+            List<GameObject> matches = null;
+            foreach (var segment in segments)
+            {
+                matches = currentLevel.Where(go => go.name == segment).ToList();
+                if (matches.Count == 0)
+                {
+                    return new List<int>();
+                }
+
+                currentLevel = matches.SelectMany(go => GetChildrenInHierarchyOrder(go, includeInactive));
+            }
+
+            return matches == null
+                ? new List<int>()
+                : matches.Select(go => go.GetInstanceID()).ToList();
+        }
+
+        /// <summary>
+        /// Gets all siblings for a GameObject in hierarchy order. Excludes the object itself.
+        /// </summary>
+        public static List<int> GetSiblings(int instanceId, bool includeInactive = false)
+        {
+            var go = FindById(instanceId);
+            if (go == null)
+            {
+                return new List<int>();
+            }
+
+            var siblings = GetSiblingObjects(go, includeInactive)
+                .Where(s => s.GetInstanceID() != instanceId)
+                .Select(s => s.GetInstanceID())
+                .ToList();
+
+            return siblings;
+        }
+
+        /// <summary>
+        /// Gets the adjacent sibling for a GameObject.
+        /// </summary>
+        /// <param name="instanceId">The object instance ID.</param>
+        /// <param name="direction">Positive for next sibling, negative for previous sibling.</param>
+        /// <param name="includeInactive">Whether to include inactive siblings.</param>
+        /// <returns>Adjacent sibling instance ID, or null if none exists.</returns>
+        public static int? GetAdjacentSibling(int instanceId, int direction, bool includeInactive = false)
+        {
+            var go = FindById(instanceId);
+            if (go == null)
+            {
+                return null;
+            }
+
+            var siblings = GetSiblingObjects(go, includeInactive).ToList();
+            var selfIndex = siblings.FindIndex(s => s.GetInstanceID() == instanceId);
+            if (selfIndex < 0)
+            {
+                return null;
+            }
+
+            var targetIndex = selfIndex + (direction >= 0 ? 1 : -1);
+            if (targetIndex < 0 || targetIndex >= siblings.Count)
+            {
+                return null;
+            }
+
+            return siblings[targetIndex].GetInstanceID();
+        }
+
         private static IEnumerable<int> SearchByName(string name, bool includeInactive, int maxResults)
         {
             var allObjects = GetAllSceneObjects(includeInactive);
@@ -152,62 +301,29 @@ namespace MCPForUnity.Editor.Helpers
 
         private static IEnumerable<int> SearchByPath(string path, bool includeInactive)
         {
-            // Check Prefab Stage first - GameObject.Find() doesn't work in Prefab Stage
-            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
-            if (prefabStage != null)
+            var allObjects = GetAllSceneObjects(includeInactive);
+            foreach (var go in allObjects)
             {
-                // Use GetAllSceneObjects which already handles Prefab Stage
-                var allObjects = GetAllSceneObjects(includeInactive);
-                foreach (var go in allObjects)
+                if (MatchesPath(go, path))
                 {
-                    if (MatchesPath(go, path))
-                    {
-                        yield return go.GetInstanceID();
-                    }
-                }
-                yield break;
-            }
-
-            // Normal scene mode
-            // NOTE: Unity's GameObject.Find(path) only finds ACTIVE GameObjects.
-            // If includeInactive=true, we need to search manually to find inactive objects.
-            if (includeInactive)
-            {
-                // Search manually to support inactive objects
-                var allObjects = GetAllSceneObjects(true);
-                foreach (var go in allObjects)
-                {
-                    if (MatchesPath(go, path))
-                    {
-                        yield return go.GetInstanceID();
-                    }
-                }
-            }
-            else
-            {
-                // Use GameObject.Find for active objects only (Unity API limitation)
-                var found = GameObject.Find(path);
-                if (found != null)
-                {
-                    yield return found.GetInstanceID();
+                    yield return go.GetInstanceID();
                 }
             }
         }
 
         private static IEnumerable<int> SearchByTag(string tag, bool includeInactive, int maxResults)
         {
-            GameObject[] taggedObjects;
             try
             {
-                if (includeInactive)
+                var allObjects = GetAllSceneObjects(includeInactive);
+                var taggedObjects = allObjects.Where(go => go.CompareTag(tag));
+
+                if (maxResults > 0)
+                    taggedObjects = taggedObjects.Take(maxResults);
+
+                foreach (var go in taggedObjects)
                 {
-                    // FindGameObjectsWithTag doesn't find inactive, so we need to iterate all
-                    var allObjects = GetAllSceneObjects(true);
-                    taggedObjects = allObjects.Where(go => go.CompareTag(tag)).ToArray();
-                }
-                else
-                {
-                    taggedObjects = GameObject.FindGameObjectsWithTag(tag);
+                    yield return go.GetInstanceID();
                 }
             }
             catch (UnityException)
@@ -215,14 +331,131 @@ namespace MCPForUnity.Editor.Helpers
                 // Tag doesn't exist
                 yield break;
             }
+        }
 
-            var results = taggedObjects.AsEnumerable();
-            if (maxResults > 0)
-                results = results.Take(maxResults);
+        private static bool MatchesSearch(GameObject go, SearchMethod method, string searchTerm, bool exactName)
+        {
+            if (go == null)
+                return false;
 
-            foreach (var go in results)
+            if (string.IsNullOrEmpty(searchTerm))
+                return method != SearchMethod.ById;
+
+            switch (method)
             {
-                yield return go.GetInstanceID();
+                case SearchMethod.ById:
+                    return int.TryParse(searchTerm, out var instanceId) && go.GetInstanceID() == instanceId;
+
+                case SearchMethod.ByName:
+                    return exactName
+                        ? string.Equals(go.name, searchTerm, StringComparison.Ordinal)
+                        : go.name.IndexOf(searchTerm, StringComparison.OrdinalIgnoreCase) >= 0;
+
+                case SearchMethod.ByTag:
+                    try
+                    {
+                        return go.CompareTag(searchTerm);
+                    }
+                    catch (UnityException)
+                    {
+                        return false;
+                    }
+
+                case SearchMethod.ByLayer:
+                    var layer = LayerMask.NameToLayer(searchTerm);
+                    if (layer == -1 && (!int.TryParse(searchTerm, out layer) || layer < 0 || layer > 31))
+                    {
+                        return false;
+                    }
+                    return go.layer == layer;
+
+                case SearchMethod.ByComponent:
+                    var componentType = FindComponentType(searchTerm);
+                    return componentType != null && go.GetComponent(componentType) != null;
+
+                case SearchMethod.ByPath:
+                    return MatchesPath(go, searchTerm);
+
+                default:
+                    return false;
+            }
+        }
+
+        private static IEnumerable<GameObject> GetRootObjectsInHierarchyOrder(bool includeInactive)
+        {
+            var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (prefabStage != null && prefabStage.prefabContentsRoot != null)
+            {
+                if (includeInactive || prefabStage.prefabContentsRoot.activeInHierarchy)
+                {
+                    yield return prefabStage.prefabContentsRoot;
+                }
+                yield break;
+            }
+
+            var scene = SceneManager.GetActiveScene();
+            if (!scene.IsValid())
+                yield break;
+
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                if (includeInactive || root.activeInHierarchy)
+                {
+                    yield return root;
+                }
+            }
+        }
+
+        private static IEnumerable<GameObject> GetChildrenInHierarchyOrder(GameObject parent, bool includeInactive)
+        {
+            if (parent == null)
+                yield break;
+
+            for (var i = 0; i < parent.transform.childCount; i++)
+            {
+                var child = parent.transform.GetChild(i).gameObject;
+                if (includeInactive || child.activeInHierarchy)
+                {
+                    yield return child;
+                }
+            }
+        }
+
+        private static IEnumerable<GameObject> GetDescendantsInHierarchyOrder(GameObject parent, bool includeInactive)
+        {
+            foreach (var child in GetChildrenInHierarchyOrder(parent, includeInactive))
+            {
+                yield return child;
+
+                foreach (var descendant in GetDescendantsInHierarchyOrder(child, includeInactive))
+                {
+                    yield return descendant;
+                }
+            }
+        }
+
+        private static IEnumerable<GameObject> GetSiblingObjects(GameObject go, bool includeInactive)
+        {
+            if (go == null)
+                yield break;
+
+            var parent = go.transform.parent;
+            if (parent == null)
+            {
+                foreach (var root in GetRootObjectsInHierarchyOrder(includeInactive))
+                {
+                    yield return root;
+                }
+                yield break;
+            }
+
+            for (var i = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i).gameObject;
+                if (includeInactive || child.activeInHierarchy)
+                {
+                    yield return child;
+                }
             }
         }
 
@@ -367,4 +600,3 @@ namespace MCPForUnity.Editor.Helpers
         }
     }
 }
-
