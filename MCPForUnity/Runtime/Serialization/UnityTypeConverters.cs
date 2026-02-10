@@ -149,8 +149,35 @@ namespace MCPForUnity.Runtime.Serialization
                 return true;
             }
 
-            resolvedPath = path;
+            resolvedPath = NormalizeAssetPath(path);
+            if (string.IsNullOrEmpty(resolvedPath))
+            {
+                error = $"Invalid asset path '{path}'.";
+                return false;
+            }
             return true;
+        }
+
+
+        private static string NormalizeAssetPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            string normalized = path.Replace('\\', '/').Trim();
+            if (normalized.Contains(".."))
+            {
+                return null;
+            }
+
+            if (!normalized.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = "Assets/" + normalized.TrimStart('/');
+            }
+
+            return normalized;
         }
 
         private static ParsedSubAsset ParseSubAsset(string subAsset)
