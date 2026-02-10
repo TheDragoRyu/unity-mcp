@@ -56,6 +56,10 @@ refresh_unity(
 )
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Scene Tools
@@ -125,6 +129,10 @@ find_gameobjects(
     include_descendants=True,
 )
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 
@@ -229,7 +237,34 @@ manage_components(
         "localScale": [2, 2, 2]
     }
 )
+
+# Set Image.sprite from canonical asset reference contract
+manage_components(
+    action="set_property",
+    target=12345,
+    component_type="Image",
+    property="sprite",
+    value={
+        "type": "AssetReference",
+        "guid": "0123456789abcdef0123456789abcdef",  # optional when path is provided
+        "path": "Assets/UI/IconAtlas.asset",         # optional when guid is provided
+        "subAsset": "Sprite:Play"                    # optional (name or Type:Name)
+    }
+)
+
+# Legacy reference forms (still supported)
+manage_components(action="set_property", target=12345, component_type="Image", property="sprite", value="Assets/UI/IconAtlas.asset")
+manage_components(action="set_property", target=12345, component_type="Image", property="sprite", value={"guid": "0123456789abcdef0123456789abcdef"})
+manage_components(action="set_property", target=12345, component_type="Image", property="sprite", value={"path": "Assets/UI/IconAtlas.asset"})
+
+# TMP font + material-like properties
+manage_components(action="set_property", target=12345, component_type="TMP_Text", property="font", value={"type":"AssetReference","path":"Assets/Fonts/MyFont.asset"})
+manage_components(action="set_property", target=12345, component_type="TMP_Text", property="fontSharedMaterial", value={"type":"AssetReference","path":"Assets/Fonts/MyFont.mat"})
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 
@@ -350,6 +385,10 @@ Delete a script file.
 delete_script(uri="mcpforunity://path/Assets/Scripts/OldScript.cs")
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Asset Tools
@@ -421,6 +460,10 @@ manage_prefabs(
     components_to_add=["AudioSource"]
 )
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 
@@ -507,6 +550,10 @@ manage_texture(
 )
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Editor Control Tools
@@ -561,6 +608,10 @@ read_console(
 read_console(action="clear")
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Testing Tools
@@ -596,6 +647,10 @@ result = get_test_job(
 # Returns: {"status": "complete"|"running"|"failed", "results": {...}}
 ```
 
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
+
 ---
 
 ## Search Tools
@@ -613,6 +668,10 @@ find_in_file(
 )
 # Returns: line numbers, content excerpts, match positions
 ```
+
+Expected assignment errors:
+- `Could not resolve sub-asset 'Sprite:Play' at path 'Assets/...'.`
+- `Resolved asset 'MyMaterial' (Material) but it cannot be assigned to property 'sprite' of type 'Sprite'.`
 
 ---
 

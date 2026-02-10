@@ -4,6 +4,7 @@ using System.Reflection;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
+using MCPForUnity.Runtime.Serialization;
 
 namespace MCPForUnity.Editor.Helpers
 {
@@ -165,19 +166,17 @@ namespace MCPForUnity.Editor.Helpers
             string normalizedName = ParamCoercion.NormalizePropertyName(propertyName);
 
             // Try property first - check both original and normalized names for backwards compatibility
-            PropertyInfo propInfo = type.GetProperty(propertyName, flags) 
+            PropertyInfo propInfo = type.GetProperty(propertyName, flags)
                                  ?? type.GetProperty(normalizedName, flags);
             if (propInfo != null && propInfo.CanWrite)
             {
                 try
                 {
-                    object convertedValue = PropertyConversion.ConvertToType(value, propInfo.PropertyType);
-                    // Detect conversion failure: null result when input wasn't null
-                    if (convertedValue == null && value.Type != JTokenType.Null)
+                    if (!TryConvertForMember(value, propInfo.PropertyType, $"property '{propertyName}'", out object convertedValue, out error))
                     {
-                        error = $"Failed to convert value for property '{propertyName}' to type '{propInfo.PropertyType.Name}'.";
                         return false;
                     }
+
                     propInfo.SetValue(component, convertedValue);
                     return true;
                 }
@@ -189,19 +188,17 @@ namespace MCPForUnity.Editor.Helpers
             }
 
             // Try field - check both original and normalized names for backwards compatibility
-            FieldInfo fieldInfo = type.GetField(propertyName, flags) 
+            FieldInfo fieldInfo = type.GetField(propertyName, flags)
                                ?? type.GetField(normalizedName, flags);
             if (fieldInfo != null && !fieldInfo.IsInitOnly)
             {
                 try
                 {
-                    object convertedValue = PropertyConversion.ConvertToType(value, fieldInfo.FieldType);
-                    // Detect conversion failure: null result when input wasn't null
-                    if (convertedValue == null && value.Type != JTokenType.Null)
+                    if (!TryConvertForMember(value, fieldInfo.FieldType, $"field '{propertyName}'", out object convertedValue, out error))
                     {
-                        error = $"Failed to convert value for field '{propertyName}' to type '{fieldInfo.FieldType.Name}'.";
                         return false;
                     }
+
                     fieldInfo.SetValue(component, convertedValue);
                     return true;
                 }
@@ -221,13 +218,11 @@ namespace MCPForUnity.Editor.Helpers
             {
                 try
                 {
-                    object convertedValue = PropertyConversion.ConvertToType(value, fieldInfo.FieldType);
-                    // Detect conversion failure: null result when input wasn't null
-                    if (convertedValue == null && value.Type != JTokenType.Null)
+                    if (!TryConvertForMember(value, fieldInfo.FieldType, $"serialized field '{propertyName}'", out object convertedValue, out error))
                     {
-                        error = $"Failed to convert value for serialized field '{propertyName}' to type '{fieldInfo.FieldType.Name}'.";
                         return false;
                     }
+
                     fieldInfo.SetValue(component, convertedValue);
                     return true;
                 }
@@ -240,6 +235,49 @@ namespace MCPForUnity.Editor.Helpers
 
             error = $"Property or field '{propertyName}' not found on component '{type.Name}'.";
             return false;
+        }
+
+        private static bool TryConvertForMember(JToken value, Type targetType, string memberLabel, out object convertedValue, out string error)
+        {
+            convertedValue = null;
+            error = null;
+
+            try
+            {
+                convertedValue = PropertyConversion.ConvertToType(value, targetType);
+            }
+            catch (Exception ex)
+            {
+                error = $"Failed to convert value for {memberLabel} to type '{targetType.Name}': {ex.Message}";
+                return false;
+            }
+
+            bool isNullInput = value == null || value.Type == JTokenType.Null;
+            if (convertedValue == null && !isNullInput)
+            {
+                if (typeof(UnityEngine.Object).IsAssignableFrom(targetType))
+                {
+                    if (UnityAssetReferenceResolver.TryResolveAssetReference(value, typeof(UnityEngine.Object), out UnityEngine.Object resolvedAsset, out string resolveError) && resolvedAsset != null)
+                    {
+                        error = $"Resolved asset '{resolvedAsset.name}' ({resolvedAsset.GetType().Name}) but it cannot be assigned to {memberLabel} of type '{targetType.Name}'.";
+                        return false;
+                    }
+
+                    error = $"Failed to resolve asset for {memberLabel} as type '{targetType.Name}'. {resolveError}";
+                    return false;
+                }
+
+                error = $"Failed to convert value for {memberLabel} to type '{targetType.Name}'.";
+                return false;
+            }
+
+            if (convertedValue != null && !targetType.IsAssignableFrom(convertedValue.GetType()))
+            {
+                error = $"Converted value for {memberLabel} has type '{convertedValue.GetType().Name}', which is not assignable to '{targetType.Name}'.";
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
