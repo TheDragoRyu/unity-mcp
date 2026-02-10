@@ -240,3 +240,52 @@ async def test_manage_components_target_by_id(monkeypatch):
     assert captured["params"]["target"] == 12345
     assert captured["params"]["searchMethod"] == "by_id"
 
+
+
+@pytest.mark.asyncio
+async def test_manage_components_set_anchor_preset_passthrough(monkeypatch):
+    """Test UI anchor preset action parameter passthrough."""
+    captured = {}
+
+    async def fake_send(cmd, params, **kwargs):
+        captured["params"] = params
+        return {"success": True, "data": {"layout": {"rectTransform": {}}}}
+
+    monkeypatch.setattr(manage_comp_mod, "async_send_command_with_retry", fake_send)
+
+    resp = await manage_comp_mod.manage_components(
+        ctx=DummyContext(),
+        action="set_anchor_preset",
+        target="HUD/ChatBubble",
+        preset="BottomStretch",
+        size_delta={"x": -32, "y": 80},
+    )
+
+    assert resp.get("success") is True
+    assert "componentType" not in captured["params"]
+    assert captured["params"]["preset"] == "BottomStretch"
+    assert captured["params"]["sizeDelta"] == {"x": -32, "y": 80}
+
+
+@pytest.mark.asyncio
+async def test_manage_components_configure_layout_element_passthrough(monkeypatch):
+    """Test layout helper action parameter passthrough and auto-add flag."""
+    captured = {}
+
+    async def fake_send(cmd, params, **kwargs):
+        captured["params"] = params
+        return {"success": True, "data": {"layout": {"preferredSizes": {}}}}
+
+    monkeypatch.setattr(manage_comp_mod, "async_send_command_with_retry", fake_send)
+
+    resp = await manage_comp_mod.manage_components(
+        ctx=DummyContext(),
+        action="configure_layout_element",
+        target="HUD/RewardCell",
+        properties={"preferredWidth": 160, "preferredHeight": 160},
+        auto_add_component=True,
+    )
+
+    assert resp.get("success") is True
+    assert captured["params"]["autoAddComponent"] is True
+    assert captured["params"]["properties"] == {"preferredWidth": 160, "preferredHeight": 160}

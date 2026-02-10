@@ -621,6 +621,10 @@ For advanced usage, send raw tool calls:
 unity-mcp raw manage_scene '{"action": "get_active"}'
 unity-mcp raw manage_gameobject '{"action": "create", "name": "Test"}'
 unity-mcp raw manage_components '{"action": "add", "target": "Test", "componentType": "Rigidbody"}'
+unity-mcp raw manage_components '{"action": "set_anchor_preset", "target": "ChatBubble", "preset": "BottomStretch", "sizeDelta": {"x": -32, "y": 80}}'
+unity-mcp raw manage_components '{"action": "configure_layout_element", "target": "ChatBubble", "properties": {"preferredWidth": 640, "preferredHeight": 80, "flexibleHeight": 0}}'
+unity-mcp raw manage_components '{"action": "configure_content_size_fitter", "target": "ChatBubble", "properties": {"horizontalFit": "Unconstrained", "verticalFit": "PreferredSize"}}'
+unity-mcp raw manage_components '{"action": "configure_layout_element", "target": "RewardCell", "properties": {"preferredWidth": 160, "preferredHeight": 160, "flexibleWidth": 0, "flexibleHeight": 0}}'
 unity-mcp raw manage_editor '{"action": "play"}'
 ```
 
