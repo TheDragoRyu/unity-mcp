@@ -196,33 +196,31 @@ namespace MCPForUnity.Editor.Helpers
 
         private static IEnumerable<int> SearchByTag(string tag, bool includeInactive, int maxResults)
         {
-            GameObject[] taggedObjects;
             try
             {
+                IEnumerable<GameObject> taggedObjects;
                 if (includeInactive)
                 {
                     // FindGameObjectsWithTag doesn't find inactive, so we need to iterate all
                     var allObjects = GetAllSceneObjects(true);
-                    taggedObjects = allObjects.Where(go => go.CompareTag(tag)).ToArray();
+                    taggedObjects = allObjects.Where(go => go.CompareTag(tag));
                 }
                 else
                 {
                     taggedObjects = GameObject.FindGameObjectsWithTag(tag);
                 }
+
+                if (maxResults > 0)
+                {
+                    taggedObjects = taggedObjects.Take(maxResults);
+                }
+
+                return taggedObjects.Select(go => go.GetInstanceID()).ToArray();
             }
             catch (UnityException)
             {
                 // Tag doesn't exist
-                yield break;
-            }
-
-            var results = taggedObjects.AsEnumerable();
-            if (maxResults > 0)
-                results = results.Take(maxResults);
-
-            foreach (var go in results)
-            {
-                yield return go.GetInstanceID();
+                return Enumerable.Empty<int>();
             }
         }
 
@@ -367,4 +365,3 @@ namespace MCPForUnity.Editor.Helpers
         }
     }
 }
-
